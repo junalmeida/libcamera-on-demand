@@ -1,0 +1,101 @@
+#!/bin/bash
+
+FALLBACK_IMAGE_PATH=""
+FALLBACK_IMAGE_PATH_DEFAULT="${HOME}/.cache/libcamera-on-demand/fallback_image.png"
+
+# 1x1 black pixel in PNG format.
+FALLBACK_IMAGE_DATA="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAA3NCSVQICAjb4U/gAAAAEHRFWHRTb2Z0d2FyZQBTaHV0dGVyY4LQCQAAAAxJREFUCNdjYGBgAAAABAABJzQnCgAAAABJRU5ErkJggg=="
+
+RESOLUTION_WIDTH="${RESOLUTION_WIDTH:-1280}"
+RESOLUTION_HEIGHT="${RESOLUTION_HEIGHT:-720}"
+FPS="${FPS:-30}"
+
+V4L2_CONTROLS="${V4L2_CONTROLS:-}" # E.g. "brightness=22,contrast=38"
+INPUT_FORMAT="${INPUT_FORMAT:-h264}"
+V4L2_DEVICE_FILTER="${V4L2_DEVICE_FILTER:-Internal front camera}"
+
+if [[ ! -f "${FALLBACK_IMAGE_PATH}" ]]; then
+  mkdir -p ${HOME}/.cache/libcamera-on-demand
+  echo $FALLBACK_IMAGE_DATA | base64 -d > $FALLBACK_IMAGE_PATH_DEFAULT
+  FALLBACK_IMAGE_PATH=$FALLBACK_IMAGE_PATH_DEFAULT
+fi
+
+_term() {
+  echo "Caught SIGTERM signal!"
+  if [ -n "${PID}" ]; then
+    echo "Killing running gstreamer with PID ${PID}" >&2
+    kill "${PID}"
+  fi
+  if [ -n "${WAITINGPID}" ]; then
+    echo "Killing running gstreamer with PID ${WAITINGPID}" >&2
+    kill "${WAITINGPID}"
+  fi
+}
+
+trap _term SIGTERM
+
+OUTPUT=$(v4l2-ctl --list-devices | grep -A1 'Virtual Front Camera' | tail -n1 | awk '{print $1}');
+
+if [ -z "${OUTPUT}" ]; then 
+	echo Cannot find v4l2loopback output >&2
+	exit 1
+else
+  	echo Selected ${OUTPUT} as output device
+fi
+
+INPUT=$(cam --list | grep -A1 "${V4L2_DEVICE_FILTER}"); 
+if [[ $INPUT =~ ^.*\((.*)\).*$ ]]; then
+  	INPUT="${BASH_REMATCH[1]}"
+  	echo Selected ${INPUT} as input device
+else
+	echo Cannot find libcamera input >&2
+	exit 1
+fi
+
+
+v4l2-ctl -d ${OUTPUT} -c timeout=1000
+v4l2-ctl -d ${OUTPUT} -c keep_format=1
+
+
+function waiting() {
+	gst-launch-1.0 videotestsrc pattern=black ! video/x-raw,width=${RESOLUTION_WIDTH},height=${RESOLUTION_HEIGHT} ! videoconvert \
+		! video/x-raw,width=${RESOLUTION_WIDTH},height=${RESOLUTION_HEIGHT},framerate=${FPS}/1,format=YUY2 \
+		! v4l2sink device=${OUTPUT} &
+	WAITINGPID="${!}"
+	sleep 1
+	#make device available
+	kill -STOP "${WAITINGPID}" #do not waste cpu cycles by suspending it.
+}
+
+function stream() {
+	echo "--- Detected usage of camera on ${OUTPUT}, spinning up gstreamer from ${INPUT}"
+	if [ -n "${WAITINGPID}" ]; then
+		kill -CONT "${WAITINGPID}"
+		kill -TERM "${WAITINGPID}"
+		unset WAITINGPID
+		sleep 1
+	fi
+	gst-launch-1.0 libcamerasrc camera-name="\\${INPUT}" ! \
+		video/x-raw,width=${RESOLUTION_WIDTH},height=${RESOLUTION_HEIGHT},framerate=${FPS}/1,format=NV12 \
+		! videoconvert ! video/x-raw,format=YUY2 ! queue ! \
+		v4l2sink device=${OUTPUT} &
+	PID="${!}"
+	echo "--- PID of gsteamer is '${PID}'"
+}
+
+
+waiting
+
+inotifywait -e OPEN,CLOSE -m "${OUTPUT}" |
+while read dir op file; do
+	if [ -n "${PID}" ]; then # streamer is already running
+		if [ "$(lsof -t "${OUTPUT}" | grep -v "${PID}" | wc -l)" -eq "0" ]; then # no more clients
+			echo "--- No more clients, stopping streamer"
+			kill "${PID}"
+			unset PID
+			waiting
+		fi
+	elif [ "$(lsof -t "${OUTPUT}" | wc -l)" -gt "1" ]; then # new clients
+		stream
+	fi
+done
