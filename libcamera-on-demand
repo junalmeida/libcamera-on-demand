@@ -1,11 +1,5 @@
 #!/bin/bash
 
-FALLBACK_IMAGE_PATH=""
-FALLBACK_IMAGE_PATH_DEFAULT="${HOME}/.cache/libcamera-on-demand/fallback_image.png"
-
-# 1x1 black pixel in PNG format.
-FALLBACK_IMAGE_DATA="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAA3NCSVQICAjb4U/gAAAAEHRFWHRTb2Z0d2FyZQBTaHV0dGVyY4LQCQAAAAxJREFUCNdjYGBgAAAABAABJzQnCgAAAABJRU5ErkJggg=="
-
 RESOLUTION_WIDTH="${RESOLUTION_WIDTH:-1280}"
 RESOLUTION_HEIGHT="${RESOLUTION_HEIGHT:-720}"
 FPS="${FPS:-30}"
@@ -13,12 +7,6 @@ FPS="${FPS:-30}"
 V4L2_CONTROLS="${V4L2_CONTROLS:-}" # E.g. "brightness=22,contrast=38"
 INPUT_FORMAT="${INPUT_FORMAT:-h264}"
 V4L2_DEVICE_FILTER="${V4L2_DEVICE_FILTER:-Internal front camera}"
-
-if [[ ! -f "${FALLBACK_IMAGE_PATH}" ]]; then
-  mkdir -p ${HOME}/.cache/libcamera-on-demand
-  echo $FALLBACK_IMAGE_DATA | base64 -d > $FALLBACK_IMAGE_PATH_DEFAULT
-  FALLBACK_IMAGE_PATH=$FALLBACK_IMAGE_PATH_DEFAULT
-fi
 
 _term() {
   echo "Caught SIGTERM signal!"
@@ -82,7 +70,6 @@ function stream() {
 	PID="${!}"
 	echo "--- PID of gsteamer is '${PID}'"
 }
-
 
 waiting
 

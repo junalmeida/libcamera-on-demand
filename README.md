@@ -13,8 +13,7 @@ Follow the steps below:
 
 1. Install [libcamera](docs/libcamera.md)
 2. Install `v4l2loopback`. In Debian/Ubuntu there should be a `v4l2loopback-dkms` package.
-3. Install `ffmpeg`
-4. Install `inotify-tools`
+3. Install `inotify-tools`
 4. Run `bash install.sh`
 
 
